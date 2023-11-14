@@ -7,6 +7,9 @@ from typing import Dict
 from datetime import datetime
 from decimal import Decimal
 
+# Decimal Formatting 
+TWO_PLACES = Decimal("0.01")
+
 def configToDict(config: configparser.ConfigParser) -> Dict[str, Dict[str, str]]:
     return {section_name: dict(config[section_name]) for section_name in config.sections()}
 
@@ -99,7 +102,7 @@ def testProcess(config, processNum, tableNum, result) :
 		
 	testTotalTime = time.time() - startTotal
 	testController.connectionClose()
-	main_logger.info("Process %s Finished" % (str(processNum)))
+	main_logger.debug("Process %s Finished" % (str(processNum)))
 
 	result.put({
 		"processNum": processNum,
@@ -119,6 +122,8 @@ def testRunner(testType, processNum, dbController, tableNum, testCount, maxKey, 
 	successCount = 0
 	failCount = 0
 	exceptionCount = 0
+	maxLength = len(str(testCount))
+	processLogger.info(f"{'BenchTest':^{maxLength*3}}|{'Test Type':^15}|{'Process':^10}|{'Table':^10}|{'Success':^10}|{'Time(ms)':^10}|")
 	for i in range(testCount):
 		requestStartTime = time.time()
 		data = gen_dummy_data(testType, maxKey, multiRowNum)
@@ -133,7 +138,7 @@ def testRunner(testType, processNum, dbController, tableNum, testCount, maxKey, 
 				failCount = failCount + (multiRowNum - result)
 		requestEndTime = time.time()
 		requestTime = (requestEndTime - requestStartTime) * 1000
-		processLogger.info(f"Bench test {i+1}/{testCount} : {testType}, {processNum}, {tableNum}, {result}, {requestTime:.2f}ms")
+		processLogger.info(f"{str(i+1)+'/'+str(testCount):>{maxLength*3}}|{testType:^15}|{processNum:>10}|{'bench_'+str(tableNum):^10}|{result:>10}|{Decimal(requestTime).quantize(TWO_PLACES):>10}|")
 	testTime = time.time() - start
 	averageTime = testTime / testCount
 
@@ -183,6 +188,7 @@ def benchRunner(config, logger) :
 	try :
 		processArr = []
 		result = Queue()
+		result.put({"testType":"START"})
 		strParallelRun = config["TEST"]["B_PARALLEL_RUN"]
 		for processCount in range(1, nProcess+1) :
 			tableNum = 1
@@ -208,18 +214,26 @@ def benchRunner(config, logger) :
 		
 		# Process Queue Finish Check
 		result.put({"testType":"EXIT"})
-
+		totalTestCount = 0
+		totalTestTime = 0.0
+		
 		while True:
 			checker = result.get()
 			if checker["testType"] == "EXIT" : 
+				logger.info("Test Total Summary")
+				logger.info(f"{'Test Count':^15}|{'Test Time(ms)':^15}|")
+				logger.info(f"{totalTestCount:>15}|{Decimal(totalTestTime * 1000).quantize(TWO_PLACES):>15}|")
+				# logger.info("Test Finished")
 				break
+			elif checker["testType"] == "START" : 
+				# Print result table header
+				logger.info(f"{'Test Type':^15}|{'ProcessNum':^12}|{'TableNum':^10}|{'Total':^10}|{'Success':^10}|{'Failed':^10}|{'Exception':^10}|{'Total Time(ms)':^15}|{'Avg. Time(ms)':^15}|")
 			else :
 				if checker["testType"] == "ALL" :
-					logger.info("Total Test Count : %d | Total Test Time : %.2f ms" % (checker["testCount"], checker["testTotalTime"] * 1000))
+					totalTestCount += checker["testCount"]
+					totalTestTime += checker["testTotalTime"]
 				else :
-					logger.info("%s | ProcessNum : %d | TableNum : %d |  Total Count : %d | Success Count : %d | Fail Count : %d | Exception Count : %d | Total Test Time : %.2f ms | Avg Test Time : %.2f ms" 
-						% (checker["testType"], checker["processNum"], checker["tableNum"], checker["testCount"], 
-						checker["successCount"], checker["failCount"], checker["exceptionCount"], checker["testTotalTime"] * 1000, checker["averageTime"] * 1000))
+					logger.info(f"{checker['testType']:^15}|{checker['processNum']:>12}|{'bench_' + str(checker['tableNum']):^10}|{checker['testCount']:>10}|{checker['successCount']:>10}|{checker['failCount']:>10}|{checker['exceptionCount']:>10}|{Decimal(checker['testTotalTime'] * 1000).quantize(TWO_PLACES):>15}|{Decimal(checker['averageTime'] * 1000).quantize(TWO_PLACES):>15}|")
 	except Exception as e :
 		logger.exception("Error")
 
